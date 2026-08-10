@@ -15,16 +15,20 @@ logging.info("Starting LINE bot...")
 app = Flask(__name__)
 
 # Env variables
-CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
-CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
-POWERAPP_FLOW_URL = os.getenv("POWERAPP_FLOW_URL")
+# CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
+# CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
+# POWERAPP_FLOW_URL = os.getenv("POWERAPP_FLOW_URL")
 
+CHANNEL_ACCESS_TOKEN = "MsOhLUmbQuGz3xZmwt6xp0Q5TkHUX/LpuZG+dGqx2EaBODRnil4tXerpD8DZWAYu3l39PHvqJ7UI+WsryDn5Ehy1DhOo0zGcdtBu57Hgnq4WULW3gNSmaAdzOE6joeZscgwjHEpHZnrMkmLs+NMDIQdB04t89/1O/w1cDnyilFU="
+CHANNEL_SECRET = "fdeb022a876b8fa0ad045976862459dd"
+POWERAPP_FLOW_URL = "https://22a8ce12e8d1e83dba6dded8feeaee.99.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/16/workflows/5c92c7232b4046a79881e26b2be79a29/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=eOUgOqjhOfdHGZKx1pHbEqX_GUbXvGsy3H-6NPL1VY8"
+ACKNOWLEDGE_FLOW_URL = "https://22a8ce12e8d1e83dba6dded8feeaee.99.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/11/workflows/e8c087a1cd564fd89efa9c4508ad5780/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=yyfcONAM3dZnDJyjohPOQ07ct_FCRwV-5pjdNF6x-Zo"
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# DB_PATH = "database.db"  
-DB_PATH = "/home/site/wwwroot/database.db" 
+DB_PATH = "database.db"  # Use a relative path for SQLite database
+# DB_PATH = "/home/site/wwwroot/database.db" 
 
 # In-memory cache { user_id: {"display_name": str, "last_record_id": int or None} }
 user_cache = {}
@@ -183,17 +187,109 @@ def handle_message(event):
 def handle_postback(event):
     user_id = event.source.user_id
     display_name = get_display_name(user_id)
-    data = event.postback.data.lower()
+    data = event.postback.data.strip()
 
-    list_type = 'service' if 'service feedback:' in data else 'action'
-    match = re.search(r'(feedback|action feedback):\s(\d+)\s+\( id :\s(\d+)', data)
+    logging.info(f"Postback received: {data}")
+
+    # ----------------------------------------
+    # ACKNOWLEDGE
+    # ----------------------------------------
+
+    ack_match = re.search(
+        r'^(Action|Service) Acknowledge\s*:\s*(Yes|No)\s*\(\s*ID\s*:\s*(\d+)\s*\)$',
+        data,
+        re.IGNORECASE
+    )
+
+    if ack_match:
+        list_type = ack_match.group(1).lower()
+        acknowledge = ack_match.group(2).capitalize()
+        record_id = int(ack_match.group(3))
+
+        logging.info(
+            f"{user_id}, {display_name}, "
+            f"{acknowledge}, {record_id}, {list_type}"
+        )
+
+        # Reply to LINE
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text=f"Thank you for your acknowledgement."
+            )
+        )
+
+        # Send to acknowledge Power Automate flow
+        response = requests.post(
+            ACKNOWLEDGE_FLOW_URL,
+            json={
+                "userId": user_id,
+                "displayName": display_name,
+                "recordId": record_id,
+                "acknowledge": acknowledge,
+                "list": list_type
+            },
+            timeout=10
+        )
+
+        logging.info(
+            f"Acknowledge flow response: "
+            f"{response.status_code} {response.text}"
+        )
+
+        return
+
+    # ----------------------------------------
+    # NORMAL FEEDBACK
+    # ----------------------------------------
+
+    data_lower = data.lower()
+
+    list_type = (
+        "service"
+        if data_lower.startswith("service feedback")
+        else "action"
+        if data_lower.startswith("action feedback")
+        else None
+    )
+
+    if not list_type:
+        return
+
+    match = re.search(
+        r'^(?:Action|Service) Feedback\s*:\s*(\d+)\s*\(\s*ID\s*:\s*(\d+)\s*\)$',
+        data,
+        re.IGNORECASE
+    )
+
     if match:
-        feedback = int(match.group(2))
-        record_id = int(match.group(3))
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"Thanks for your feedback: {feedback}/5!"))
-        logging.info(f"{user_id}, {display_name}, {feedback}, {record_id}, -, {list_type}")
+        feedback = int(match.group(1))
+        record_id = int(match.group(2))
+
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text=f"Thanks for your feedback: {feedback}/5!"
+            )
+        )
+
+        logging.info(
+            f"{user_id}, {display_name}, "
+            f"{feedback}, {record_id}, {list_type}"
+        )
+
         update_last_record_id(user_id, record_id)
-        send_to_powerapp(user_id, display_name, feedback, record_id, "-", list_type)
+
+        send_to_powerapp(
+            user_id,
+            display_name,
+            feedback,
+            record_id,
+            "-",
+            list_type
+        )
+
+        return
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
