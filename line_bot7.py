@@ -15,20 +15,16 @@ logging.info("Starting LINE bot...")
 app = Flask(__name__)
 
 # Env variables
-# CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
-# CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
-# POWERAPP_FLOW_URL = os.getenv("POWERAPP_FLOW_URL")
-
-CHANNEL_ACCESS_TOKEN = "MsOhLUmbQuGz3xZmwt6xp0Q5TkHUX/LpuZG+dGqx2EaBODRnil4tXerpD8DZWAYu3l39PHvqJ7UI+WsryDn5Ehy1DhOo0zGcdtBu57Hgnq4WULW3gNSmaAdzOE6joeZscgwjHEpHZnrMkmLs+NMDIQdB04t89/1O/w1cDnyilFU="
-CHANNEL_SECRET = "fdeb022a876b8fa0ad045976862459dd"
-POWERAPP_FLOW_URL = "https://22a8ce12e8d1e83dba6dded8feeaee.99.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/16/workflows/5c92c7232b4046a79881e26b2be79a29/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=eOUgOqjhOfdHGZKx1pHbEqX_GUbXvGsy3H-6NPL1VY8"
-ACKNOWLEDGE_FLOW_URL = "https://22a8ce12e8d1e83dba6dded8feeaee.99.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/11/workflows/e8c087a1cd564fd89efa9c4508ad5780/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=yyfcONAM3dZnDJyjohPOQ07ct_FCRwV-5pjdNF6x-Zo"
+CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
+CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
+POWERAPP_FLOW_URL = os.getenv("POWERAPP_FLOW_URL")
+ACKNOWLEDGE_FLOW_URL = os.getenv("ACKNOWLEDGE_FLOW_URL")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-DB_PATH = "database.db"  # Use a relative path for SQLite database
-# DB_PATH = "/home/site/wwwroot/database.db" 
+# DB_PATH = "database.db"  # Use a relative path for SQLite database
+DB_PATH = "/home/site/wwwroot/database.db" 
 
 # In-memory cache { user_id: {"display_name": str, "last_record_id": int or None} }
 user_cache = {}
