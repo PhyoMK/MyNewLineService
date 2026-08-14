@@ -35,10 +35,10 @@ def load_cache_from_db():
     global user_cache
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT user_id, display_name, last_record_id FROM users")
+    c.execute("SELECT user_id, display_name, last_record_id, last_acknowledge FROM users")
     rows = c.fetchall()
     conn.close()
-    user_cache = {r[0]: {"display_name": r[1], "last_record_id": r[2]} for r in rows}
+    user_cache = {r[0]: {"display_name": r[1], "last_record_id": r[2], "last_acknowledge": r[3]} for r in rows}
     logging.info(f"Cache loaded with {len(user_cache)} users.")
 
 # ---------- SQLite helper functions ----------
@@ -49,15 +49,19 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             display_name TEXT,
-            last_record_id INTEGER
+            last_record_id INTEGER,
+            last_acknowledge TEXT
         )
     ''')
+    columns = {row[1] for row in c.execute("PRAGMA table_info(users)")}
+    if "last_acknowledge" not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN last_acknowledge TEXT")
     conn.commit()
     conn.close()
 
 def add_user(user_id, display_name):
     # Update cache
-    user_cache[user_id] = {"display_name": display_name, "last_record_id": None}
+    user_cache[user_id] = {"display_name": display_name, "last_record_id": None, "last_acknowledge": None}
 
     # Write only once for new users
     conn = sqlite3.connect(DB_PATH)
@@ -92,6 +96,23 @@ def update_last_record_id(user_id, record_id):
 def get_last_record_id(user_id):
     return user_cache.get(user_id, {}).get("last_record_id")
 
+
+def update_last_acknowledge(user_id, acknowledge):
+    if user_id in user_cache:
+        user_cache[user_id]["last_acknowledge"] = acknowledge
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        "UPDATE users SET last_acknowledge = ? WHERE user_id = ?",
+        (acknowledge, user_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_last_acknowledge(user_id):
+    return user_cache.get(user_id, {}).get("last_acknowledge")
 @app.route("/delete_all_users", methods=['GET', 'DELETE'])
 def delete_all_users():
     conn = sqlite3.connect(DB_PATH)
@@ -125,6 +146,17 @@ def send_to_powerapp(user_id, display_name, feedback, record_id, feedbacktxt, li
         "feedbacktxt": feedbacktxt,
         "list": list_type
     })
+
+
+def send_to_acknowledge(user_id, display_name, record_id, acknowledge, list_type, comment):
+    return requests.post(ACKNOWLEDGE_FLOW_URL, json={
+        "userId": user_id,
+        "displayName": display_name,
+        "recordId": record_id,
+        "acknowledge": acknowledge,
+        "list": list_type,
+        "comment": comment
+    }, timeout=10)
 
 
 @app.route("/webhook", methods=['POST'])
@@ -178,6 +210,24 @@ def handle_message(event):
                 logging.info(f"{user_id}, {display_name}, 0, {record_id}, {match.group(1)}, {list_type}")
                 send_to_powerapp(user_id, display_name, 0, record_id, match.group(1), list_type)
             return
+    
+    for prefix in ['Action Comment :', 'Service Comment :']:
+        if prefix in msg:
+            list_type = 'service' if 'Service' in prefix else 'action'
+            match = re.search(r':\s*(.+)', msg)
+            record_id = get_last_record_id(user_id)
+            if match:                
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(text="Thanks for your feedback!"))
+                logging.info(f"{user_id}, {display_name}, 0, {record_id}, {match.group(1)}, {list_type}")
+                send_to_acknowledge(
+                    user_id,
+                    display_name,
+                    record_id,
+                    get_last_acknowledge(user_id),
+                    list_type,
+                    match.group(1)
+                )
+            return
 
 @handler.add(PostbackEvent)
 def handle_postback(event):
@@ -215,17 +265,17 @@ def handle_postback(event):
             )
         )
 
+        update_last_record_id(user_id, record_id)
+        update_last_acknowledge(user_id, acknowledge)
+        
         # Send to acknowledge Power Automate flow
-        response = requests.post(
-            ACKNOWLEDGE_FLOW_URL,
-            json={
-                "userId": user_id,
-                "displayName": display_name,
-                "recordId": record_id,
-                "acknowledge": acknowledge,
-                "list": list_type
-            },
-            timeout=10
+        response = send_to_acknowledge(
+            user_id,
+            display_name,
+            record_id,
+            acknowledge,
+            list_type,
+            "-"
         )
 
         logging.info(
